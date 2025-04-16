@@ -1,0 +1,138 @@
+---
+title: "Ejemplo. Ejercicio 5, Cap. 3"
+date: "Febrero 2025"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 1
+    theme: cerulean
+---
+
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<style type="text/css">
+body{/*Normal*/
+     font-size: 20px;
+}
+</style>
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(discrtr) # A companion package for the book Introduction to Discrete Choice Analysis with `R`
+library(mlogit) # Multinomial Logit Models
+library(readr) # Read Rectangular Text Data
+library(gplots) # Various R Programming Tools for Plotting Data
+library(ggmosaic) # Mosaic Plots in the 'ggplot2' Framework
+library(treemapify)
+library(ggridges)
+library(ggalluvial)
+library(plotly)
+```
+
+# Función de densidad
+
+```{r}
+
+B <-1
+
+f_den <- function(x, B=1){
+  if(x>=-B & x<=0){
+    y <- 1/B^2 * x + 1/B
+  }else if(x > 0 & x<=B){
+    y <- -1/B^2 * x + 1/B
+  }else{
+    y <- 0
+  }
+  return(y)
+  
+}
+
+f_den(0)
+
+fv_den <- Vectorize(f_den, "x")
+x<- seq(-1.5, 1.5, length.out=500)
+y<- sapply(x, f_den)
+
+
+ggplot()+
+  geom_line(aes(x,y), color = "dodgerblue4", linewidth =1.5)+
+  geom_function(fun=fv_den, color="darkgray", linewidth =0.5)+
+  xlim(-1.5, 1.5)+
+  theme_bw()
+
+```
+
+
+```{r}
+
+fv_den <- Vectorize(f_den, "x")
+
+f_dis <- function(x, B=1){
+  if(x<(-1)*B){
+    y <- 0} else if(x >= -B & x<=0){
+    y <- (x+B)*fv_den(x)/2} else if(x >0 & x <= B){
+    y <- 1-(B-x)*(fv_den(x)/2)
+  } else
+    y <- 0
+  return(y)
+  
+}
+
+f_dis(0)
+
+#fv_den <- Vectorize(f_dis, "x")
+x<- seq(-1.5, 1.5, length.out=500)
+y<- sapply(x, f_den)
+
+
+ggplot()+
+  geom_line(aes(x,y), color = "dodgerblue4", linewidth =1.5)+
+  geom_function(fun=fv_den, color="darkgray", linewidth =0.5)+
+  xlim(-1.5, 1.5)+
+  theme_bw()
+
+```
+
+
+```{r}
+decision <- function(Vj, Vi, B=1){
+  Vji <- Vj - Vi
+  PVj <- f_dis(Vji)
+  
+  
+  ggplot()+
+  geom_function(fun = fv_den, color="lightpink4", linewidth =0.5, xlim = c(-B-0.1, B+0.1))+
+  stat_function(fun = fv_den, geom ="area", fill="goldenrod3", alpha=0.5, xlim = c(-B, Vji))+
+  geom_text(aes(B/2, 1/(2*B)), label=paste0("Prob(Vj)=", round(PVj, 2), sep =" "))+
+  labs(title = "Probabilidad de elección")+
+  
+  theme_bw()
+  
+}
+
+
+decision(Vj=6, Vi=5.5)
+```
+
+
+```{r}
+# Hacemos la gráfica de la función de utilidad
+
+
+
+
+
+
+
+```
+
+
+

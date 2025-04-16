@@ -1,0 +1,201 @@
+---
+title: "2. Exploratory Data Analysis. Ejercicios"
+date: "Febrero 2025"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 1
+    theme: cerulean
+---
+
+
+<style>
+body {
+text-align: justify}
+</style>
+
+<style type="text/css">
+body{/*Normal*/
+     font-size: 20px;
+}
+</style>
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(discrtr) # A companion package for the book Introduction to Discrete Choice Analysis with `R`
+library(mlogit) # Multinomial Logit Models
+library(readr) # Read Rectangular Text Data
+
+library(gplots) # Various R Programming Tools for Plotting Data
+library(ggmosaic) # Mosaic Plots in the 'ggplot2' Framework
+library(treemapify)
+library(ggridges)
+library(ggalluvial)
+library(plotly)
+```
+
+
+Call data set Car from package mlogit. Once you have loaded the data set, do the following:
+
+
+```{r}
+
+data("Car", package = "mlogit")
+
+head(Car)
+
+```
+
+
+* How many variables are there in this data set and of which type (i.e., categorical/quantitative)?
+
+```{r}
+glimpse(Car)
+```
+
+Hay 13 variables categóricas y 57 variables cuantitativas.
+
+
+* Choose four relevant categorical variables from this data set and describe them using univariate, bivariate, and multivariate techniques. Discuss your results.
+
+Para observarlo mejor en el análisis univariable con una gráfica de barras
+```{r}
+
+ggplot(Car)+
+  geom_bar(aes(choice, fill=choice), color="black", 
+           show.legend = FALSE)+
+  theme_bw()
+
+```
+
+
+```{r}
+
+ggplot(Car)+
+  geom_bar(aes(type1, fill=choice), color="black", 
+           show.legend = FALSE)+
+  theme_bw()
+
+```
+
+```{r}
+
+ggplot(Car)+
+  geom_bar(aes(type2, fill=choice), color="black", 
+           show.legend = FALSE)+
+  theme_bw()
+
+```
+
+```{r}
+
+ggplot(Car)+
+  geom_bar(aes(fuel1, fill=choice), color="black", 
+           show.legend = FALSE)+
+  theme_bw()
+
+```
+
+```{r}
+
+ggplot(Car)+
+  geom_bar(aes(fuel2, fill=choice), color="black", 
+           show.legend = FALSE)+
+  theme_bw()
+
+```
+
+Para el análisis bivariable utilizaremos una gráfica de densidad para comparar dos conjuntos de datos
+
+
+```{r}
+#Vamos a realizar una gráfica de densidad para comparar dos conjuntos de datos
+ggplot(Car)+
+#  geom_density(aes(choice, fill = "Elección"), color = "black", alpha = 0.5)+
+  geom_density(aes(type1, fill = "Tipo 1"), color = "black", alpha = 0.5)+
+  geom_density(aes(type2, fill = "Tipo 2"), color = "black", alpha = 0.5)+
+  geom_density(aes(fuel1, fill = "Fuel 1"), color = "black", alpha = 0.5)+
+  geom_density(aes(fuel2, fill = "Fuel 2"), color = "black", alpha = 0.5)+
+  scale_fill_manual(values = c("Tipo 1" = "firebrick", "Tipo 2" = "dodgerblue3", "Fuel 1" = "darkgoldenrod2", "Fuel 2" = "purple4"), name = "Car")+
+  xlab("Selecciones")+
+  theme_bw()
+
+```
+
+Utilizando una técnica de análisis multivariable, obtenemos:
+
+```{r}
+Car_alluvia <- Car |> 
+  select(choice, type1, type2, fuel1, fuel2) |> 
+  group_by(choice, type1, type2, fuel1, fuel2) |> 
+  summarize(frequency = n(), .groups = "drop")
+```
+
+```{r}
+Car_alluvia |> 
+  ggplot(aes(y = frequency, axis1 = choice, axis2 = type1, axis3 = type2, axis4 = fuel1, axis5 = fuel2)) +
+  geom_alluvium(aes(fill = choice), width = 1/3, color = "black") +
+  geom_stratum(width = 1/3, fill = "black", color = "grey") +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), color = "white", size = 3) +
+  scale_x_discrete(limits = c("Choice", "Tipo 1", "Tipo 2", "Combustible 1", "Combustible 2"), expand = c(.05, .05)) +
+  scale_fill_brewer(type = "qual", palette = "Spectral") + 
+  theme_minimal()
+```
+
+
+* What ideas about individuals’ choices regarding car do you develop from this EDA exercise?
+
+En el combustible hay una preferencia clara por el metanol pero en cuanto a los tipos si bien hay mayor diversidad, la mayoria prefiere un regcar (auto regular).
+
+
+Se carga el conjunto de datos, se muestran las variables y su tipo:
+
+```{r}
+data(Car)
+glimpse(Car)
+```
+
+En este caso es necesario añadir columnas acerca de la elección:
+
+
+```{r}
+new_car <- Car
+choice_char <- gsub("choice","", new_car$choice)
+new_car <- new_car |> mutate(choice_char = choice_char)
+
+type <- vector("character", nrow(new_car))
+fuel <- vector("character", nrow(new_car))
+price <- vector("numeric", nrow(new_car))
+range <- vector("numeric", nrow(new_car))
+acc <- vector("numeric", nrow(new_car))
+speed <- vector("numeric", nrow(new_car))
+pollution <- vector("numeric", nrow(new_car))
+size <- vector("numeric", nrow(new_car))
+space <- vector("numeric", nrow(new_car))
+cost <- vector("numeric", nrow(new_car))
+station <- vector("numeric", nrow(new_car))
+for (i in 1:nrow(new_car)) {
+  type[i] <- as.character(new_car[i, paste0("type", new_car$choice_char[i], collapse = "")])
+  fuel[i] <- as.character(new_car[i, paste0("fuel", new_car$choice_char[i], collapse = "")])
+  price[i] <- new_car[i, paste0("price", new_car$choice_char[i], collapse = "")]
+  range[i] <- new_car[i, paste0("range", new_car$choice_char[i], collapse = "")]
+  acc[i] <- new_car[i, paste0("acc", new_car$choice_char[i], collapse = "")]
+  speed[i] <- new_car[i, paste0("speed", new_car$choice_char[i], collapse = "")]
+  pollution[i] <- new_car[i, paste0("pollution", new_car$choice_char[i], collapse = "")]
+  size[i] <- new_car[i, paste0("size", new_car$choice_char[i], collapse = "")]
+  space[i] <- new_car[i, paste0("space", new_car$choice_char[i], collapse = "")]
+  cost[i] <- new_car[i, paste0("cost", new_car$choice_char[i], collapse = "")]
+  station[i] <- new_car[i, paste0("station", new_car$choice_char[i], collapse = "")]
+}
+
+new_car <- new_car |> mutate(choice_num= factor(choice_char), type=type, fuel=fuel, price=price, range=range,
+                             acc=acc, speed=speed, pollution=pollution, size=size, space=space, cost=cost,
+                             station=station)
+
+new_car$type <- factor(new_car$type, levels = levels(new_car$type1))
+new_car$fuel <- factor(new_car$fuel, levels = levels(new_car$fuel1))
+```
