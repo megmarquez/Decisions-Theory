@@ -1,0 +1,611 @@
+---
+title: "Tarea 5. Behavioral Insights from Choice Models"
+author: "Estefanía Gutiérrez"
+format: 
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-tools: true
+    smooth-scroll: true
+    number-sections: true
+    page-layout: full
+editor: visual
+---
+
+```{r}
+#| message: false
+#| warning: false
+#| code-fold: true
+```
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(discrtr) # A companion package for the book Introduction to Discrete Choice Analysis with `R`
+library(dplyr) # A Grammar of Data Manipulation
+library(ggplot2) # Create Elegant Data Visualisations Using the Grammar of Graphics
+library(mlogit) # Multinomial Logit Models
+library(readr) # Read Rectangular Text Data
+library(gplots) # Various R Programming Tools for Plotting Data
+library(ggmosaic) # Mosaic Plots in the 'ggplot2' Framework
+library(treemapify)
+library(ggridges)
+library(ggalluvial)
+library(evd)
+library(htmlwidgets) # HTML Widgets for R
+library(kableExtra) # Construct Complex Table with kable and Pipe Syntax
+library(plotly) # Create interactive web graphics
+library(tidyr) # Tidy messy data
+#library(webshot2) # Take screenshots of web pages
+
+library(evd)
+```
+
+
+# Resumen 
+
+Utilización de modelos de elección discreta en el método de modelo multinomial logit para compreder preferencias o inferir comportamientos. 
+
+De esta forma, se genera un modelo que proyecta y examina cómo cambiaría el comportamiento de elección si las condiciones en la situación de la toma de decisiones cambian.
+
+Con el fin de examinar esta metodología, utilizaremos un conjunto de datos de elección de los sistemas de calefacción de los consumidores de California.
+
+Se considerarán solamente 5 tipos de sistemas:
+
+° Gas Central (gc)
+° Gas Room (gr)
+° Electric Central (ec)
+° Electric Room (er)
+° Heat Pump (hp)
+
+```{r}
+data("Heating")
+glimpse(Heating)
+```
+
+Esta tabla muestra las medianas del costo de instalación, costo de operación anual y las proporciones de elección en la muestra:
+
+```{r}
+Proportion <- Heating %>% group_by(depvar) %>% summarise(no_rows = n())
+
+df <- data.frame(System = c("Gas Central", "Gas Room", "Electric Central", "Electric Room", "Heat Pump"),
+                 Installation = c(median(Heating$ic.gc), median(Heating$ic.gr),
+                                  median(Heating$ic.ec), median(Heating$ic.er),
+                                  median(Heating$ic.hp)),
+                 Operation = c(median(Heating$oc.gc), median(Heating$oc.gr),
+                               median(Heating$oc.ec), median(Heating$oc.er),
+                               median(Heating$oc.hp)),
+                 Proportion = Proportion$no_rows/900)
+
+df %>% kable() %>% kable_styling()
+```
+
+Además, el conjunto de datos incluye información acerca de los consumidores, como la edad, el ingreso, número de habitaciones y la región de California:
+
+```{r}
+Heating %>% select(13:16) %>% summary()
+```
+
+Cambiaremos los datos por longitud
+
+```{r}
+H <- Heating %>% mlogit.data(shape = "wide", choice="depvar", varying=c(3:12))
+```
+
+Se puede trasnformar a long utilizando la función varying:
+
+
+```{r}
+model1 <- mlogit(depvar~ ic, Heating, shape="wide", choice="depvar", reflevel = "ec", varying=c(3:7))
+summary(model1)
+```
+
+
+O aplicando el formato de tabla longitudinal
+
+```{r}
+model1_Long <- mlogit(depvar~ic, H, reflevel = "ec")
+summary(model1_Long)
+```
+
+
+## Interpretación de los coeficientes
+
+Los coeficientes relacionan las preferencias implícitas de las características de una alternativa, es decir, que reflejan el efecto de varias variables sobre las probabilidades de seleccionar alternativas.
+
+Si el coeficiente es positivo entonces la utilidad incrementa si el atributo aumenta, si es negativo entonces la utilidad diminuirá si el atributo incrementa.
+
+
+```{r}
+mu <- 0
+sigma <- 1
+
+df <- tibble(x=seq(from=-6+mu, to=6+mu, by=0.01 ), 
+             f=plogis(x, location=mu, scale=sigma))
+
+
+
+logit_plot <- ggplot(df)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  geom_line(aes(x,f), color="orange", linewidth=1.2)+
+  xlab(expression(paste(V[i]-V[j])))+
+  ylab(expression(paste(P[i])))+
+   annotate("segment", x = -3.75, xend = -2.5, y = 0.024, yend = 0.024, colour = "blue", linetype = "solid")+
+   annotate("segment", x = -2.5, xend = -2.5, y = 0.024, yend = 0.075, colour = "blue", linetype = "solid")+
+   annotate("segment", x = 0, xend = 1.25, y = 0.5, yend = 0.5, colour = "red", linetype = "dashed")+
+   annotate("segment", x = 1.25, xend = 1.25, y = 0.5, yend = 0.77, colour = "red", linetype = "dashed")
+
+logit_plot
+```
+
+## Efectos marginales 
+
+El efecto marginal se refiere al cambio en una variable dependiente cuando una variable independiente cambia en una unidad.
+
+```{r}
+ic_min <- Heating[1, ]
+ic_mean <- Heating[1, ]
+ic_max <- Heating[1, ]
+```
+
+Para calcular el valor mínimo, medio y máximo de los costos de instalación se aplicaran los siguientes pasos:
+
+1) Definir vectores...
+
+```{r}
+min_cost <- Heating %>% select(starts_with("ic")) %>%
+                        summarise(across(.cols = everything(), min))
+
+mean_cost <- Heating %>% select(starts_with("ic")) %>%
+             summarise(across(.cols = everything(), mean))
+
+max_cost <- Heating %>% select(starts_with("ic")) %>%  
+                        summarise(across(.cols = everything(), max))
+```
+
+2) Reemplazar el costo de instalación con esos vectores
+
+```{r}
+ic_min[3:7] <- min_cost
+ic_mean[3:7] <- mean_cost
+ic_max[3:7] <- max_cost
+```
+
+3) Aquí ya pudimos obtener los máximos:
+
+```{r}
+head(ic_max)
+```
+
+4) Podemos predecir las probabilidades con la siguiente fórmula:
+
+```{r}
+p_model1_ic_min <- predict(model1, newdata = mlogit.data(ic_min, shape = "wide", choice = "depvar", varying = 3:7))
+
+p_model1_ic_mean <- predict(model1, newdata = mlogit.data(ic_mean, shape = "wide", choice = "depvar", varying = 3:7))
+
+p_model1_ic_max <- predict(model1, newdata = mlogit.data(ic_max, shape = "wide", choice = "depvar", varying = 3:7))
+```
+
+5) Como salen desordenadas se reordenan
+
+```{r}
+min_cost
+```
+
+```{r}
+p_model1_ic_min
+```
+
+6) Las probabilidades y sus respectivos costos se resumen a constinuación:
+
+```{r}
+data.frame(System = c("Electric Central", "Electric Room", "Gas Central", "Gas Room", "Heat Pump"),
+           ic_min = ic_min %>% select(ic.ec, ic.er, ic.gc, ic.gr, ic.hp) %>% t() %>% as.numeric() %>%
+                    round(1),
+           p_min = p_model1_ic_min %>% as.numeric() %>% round(3),
+           ic_mean = ic_mean %>% select(ic.ec, ic.er, ic.gc, ic.gr, ic.hp) %>% t() %>% as.numeric() %>%
+                     round(1),
+          p_mean = p_model1_ic_mean %>% as.numeric() %>% round(3),
+          ic_max = ic_max %>% select(ic.ec, ic.er, ic.gc, ic.gr, ic.hp) %>% t() %>% as.numeric() %>%
+                   round(1),
+          p_max = p_model1_ic_max %>% as.numeric() %>% round(3)) %>%
+          kable(col.names = c("System", "Cost", "Probability", "Cost", "Probability", "Cost", "Probability"),
+          digits = 3) %>% kable_styling() %>% 
+          add_header_above(c(" " = 1, "Minimum Cost" = 2, "Mean Cost" = 2, "Maximum Cost" = 2))
+```
+
+## Efectos Marginales Directos
+
+Se define para identificar cuánto cambiaria la probabilidad de escoger alguna alternativa si se aplica un cambio de una unidad en el atributo k.
+
+Si lo aplicamos al escenario del sistema de gas central en sus 3 niveles de costo, entonces obtendríamos:
+
+```{r}
+min <- -0.00168108 * (1 - 0.617)
+prom <- -0.00168108 * (1 - 0.639)
+max <- -0.00168108 * (1 - 0.672)
+```
+
+
+```{r}
+tabla_costo <- data.frame(
+  Costo_min = min,
+  Costo_p = prom,
+  Costo_max = max
+)
+
+tabla_costo
+
+```
+
+## Efectos Marginales Transversales
+
+Este cálculo se hace para calcular cuánto cambiaría la probabilidad de escoger la alternativa i si el atributo k de la alternativa j cambia en una unidad.
+
+```{r}
+min <- -(-0.00168108 * 0.617)
+prom <- -(-0.00168108 * 0.639)
+max <- -(-0.00168108 * 0.672)
+```
+
+
+```{r}
+tabla_costo <- data.frame(
+  Costo_min = min,
+  Costo_p = prom,
+  Costo_max = max
+)
+
+tabla_costo
+
+```
+
+## Elasticidad
+
+La elasticidad mide la vulnerabilidad de cambio de una variable independiente ante su entorno.
+
+### Elasticidad de punto-directo
+
+Responde a ¿cuánto cambiaria la probabilidad de escoger la alternativa i si su k-ésimo atributo cambia en un 1%?
+
+```{r}
+min <- -0.00168108 * 431.8 * (1 - 0.617)
+prom <- -0.00168108 * 776.8 * (1 - 0.639)
+max <- -0.00168108 * 1158.9 * (1 - 0.672)
+```
+
+
+```{r}
+tabla_costo <- data.frame(
+  Costo_min = min,
+  Costo_p = prom,
+  Costo_max = max
+)
+
+tabla_costo
+
+```
+
+### Elasticidad Punto-Transversal
+
+Responde a cuánto cambiaría la probabilidad de escoger la alternativa i si el atributo k de la alternativa j cambia en un 1%
+
+```{r}
+min <- -(-0.00168108 * 431.8 * 0.617)
+prom <- -(-0.00168108 * 776.8 * 0.639)
+max <- -(-0.00168108 * 1158.9 * 0.672)
+```
+
+
+```{r}
+tabla_costo <- data.frame(
+  Costo_min = min,
+  Costo_p = prom,
+  Costo_max = max
+)
+
+tabla_costo
+
+```
+
+## Calculo de los Efectos Marginales 
+
+Se calculan con la función effects
+
+En la tabla de a continuación se identifican los valores en diagonal que son los marginales directos, los cruzados son efectos trasnversales.
+
+```{r}
+# Calculate the marginal effects with respect to attribute "ic"
+# Type of effects to compute: relative for probability, absolute for attribute
+effects(model1, covariate = "ic", type = "ra",
+        data = mlogit.data(ic_min, shape = "wide", choice = "depvar", varying = 3:7))
+```
+
+Los efectos marginales para los valores promedio (denominados MEM, marginal effects at the mean) son:
+
+```{r}
+effects(model1, covariate = "ic", type = "ra", data = mlogit.data(ic_mean, shape = "wide",
+        choice = "depvar", varying = 3:7))
+```
+
+Y los efectos marginales para los valores máximos de costo de instalación son:
+
+```{r}
+effects(model1, covariate = "ic", type = "ra", data = mlogit.data(ic_max, shape = "wide",
+        choice = "depvar", varying = 3:7))
+```
+
+## Cálculo de Elasticidades
+
+Así se calculan las elasticidades de punto-directo y de punto-transversal
+
+```{r}
+effects(model1, covariate = "ic", type = "rr", data = mlogit.data(ic_min, shape = "wide", choice = "depvar",
+        varying = 3:7))
+```
+
+De manera que la de punto-directo (es la diagonal) y el resto es de punto-transversal
+
+
+Los efectos pueden ser calculados para varios niveles de la covariable de interés, por ejemplo, para los valores promedio y máximo de los costos de instalación:
+
+Valores promedio:
+
+```{r}
+effects(model1, covariate = "ic", type = "rr", data = mlogit.data(ic_mean, shape = "wide", choice = "depvar",
+        varying = 3:7))
+```
+
+Máximo de los costos de instalación
+
+```{r}
+effects(model1, covariate = "ic", type = "rr", data = mlogit.data(ic_max, shape = "wide", choice = "depvar",
+        varying = 3:7))
+```
+
+## Una observación acerca de los atributos cualitativos
+
+```{r}
+summary(Heating$region)
+```
+
+Estimaremos un segundo modelo considerando la variable con las regiones
+
+```{r}
+model2 <- mlogit(depvar ~ ic | region, Heating, shape = "wide", choice = "depvar", reflevel = "ec",
+                 varying = c(3:7))
+
+summary(model2)
+```
+
+
+Si bien los coeficientes de region no son significativos, podemos ejemplificar el calculo del efecto marginal de la variable categórica para el costo promedio de instalación. Para agregar las cuatro regiones al conjunto de datos de prueba, se copia la fila cuatro veces y luego se agregan las regiones:
+
+```{r}
+ic_mean_region <- ic_mean %>% mutate(count=4) %>% uncount(count)
+
+ic_mean_region$region <- c("valley", "scostl", "mountn", "ncostl")
+
+head(ic_mean_region)
+```
+
+Luego se calculan las probabilidades asociadas a cada región y sistema de calefacción. Nótese que para cada región, la suma de las probabilidades es igual a 1.
+
+
+```{r}
+p_region_ic_mean <- data.frame(Region = c("valley", "scostl", "mountn", "ncostl"),
+                               predict(model2, newdata = mlogit.data(ic_mean_region, shape = "wide",
+                               choice = "depvar", varying = 3:7),
+                               outcome = FALSE))
+
+p_region_ic_mean
+```
+
+Los efectos marginales de cambiar Valley por cualquier otra region son:
+
+```{r}
+data.frame (Effect = c("valley to scostl", "valley to mountn", "valley to ncostl"),
+            rbind (p_region_ic_mean[2, 2:6] - p_region_ic_mean[1, 2:6],
+                   p_region_ic_mean[3, 2:6] - p_region_ic_mean[1, 2:6],
+                   p_region_ic_mean[4, 2:6] - p_region_ic_mean[1, 2:6]))
+```
+
+
+## Disposición a pagar y tasa de descuento
+
+¿Qué incremento en el costo de instalación están dispuestos a pagar los consumidores en intercambio por menores costos de operación anual?
+
+```{r}
+model3 <- mlogit(depvar ~ ic + oc, Heating, shape = "wide", choice = "depvar", reflevel = "ec", varying = c(3:12))
+
+summary(model3)
+```
+
+La disposición a pagar equivale a los coeficientes:
+
+```{r}
+DP <- -0.0069/-0.0015
+DP
+```
+
+La voluntad a pagar es un adicional de 4.56 dólares en el costo de instalación por cada dólar ahorrado en el costo de operación anual.
+
+La tasa de descuento seria entonces:
+
+```{r}
+TD <- 1/DP
+TD
+```
+
+### Simulación de Cambios en los Mercados
+
+## Incentivos 
+
+```{r}
+H_rebate <- Heating %>% mutate(ic.hp=0.85*ic.hp)
+```
+
+```{r}
+data.frame(Policy = c("Do nothing", "15% rebate"),
+           rbind(apply(predict(model3, newdata = mlogit.data(Heating, shape = "wide", choice = "depvar",
+                       varying = c(3:12))), 2, mean),
+                 apply(predict(model3, newdata = mlogit.data(H_rebate, shape = "wide", choice = "depvar",
+                       varying = c(3:12))), 2, mean)))
+```
+
+### Introducción de un Sistema Nuevo
+
+Suponiendo que se desarrolla un sistema eléctric más eficiente. el costo de instalación es 200 dólares más en relación al electric central.
+
+Pero electric central tiene una operatividad de el 75%
+
+¿Cuál es la disposición del consumidor?
+
+Primero se crea la matriz
+
+```{r}
+X <- model.matrix(model3)
+head(X)
+```
+Creamos la alternativa con los atributos de electric central 
+
+```{r}
+alt <- index(H)$alt
+Xn <- X[alt=="ec", ]
+head(Xn)
+```
+Se modifican los atributos para el nuevo sistema, es decir +200 en ic y 0.75 de oc
+
+```{r}
+Xn[, "ic"] <-  Xn[, "ic"] + 200
+Xn[, "oc"] <-  Xn[, "oc"] * 0.75
+head(Xn)
+```
+
+Agregar los identificadores únicos que combinan el número de hogar y el tipo de sistema de calefacción
+
+```{r}
+chid <- index(H)$chid
+head(chid, 12)
+```
+```{r}
+unchid <- unique(index(H)$chid)
+head(unchid, 12)
+```
+
+```{r}
+rownames(Xn) <- paste(unchid, 'new', sep = ".")
+chidb <- c(chid, unchid)
+head(Xn)
+```
+
+Unimos el nuevo sistema a la matriz del modelo y ordenamos por id de elección:
+
+```{r}
+X <- rbind(X, Xn)
+X <- X[order(chidb), ]
+head(X,15)
+```
+La función predict solo acepta los datos de las alternativas originales por eso se van a calcular a mano con el chunk de exponencial
+
+```{r}
+exp_Xb <- as.numeric(exp(X %*% coef(model3))) # vectors
+head(exp_Xb)
+```
+```{r}
+# tapply does the sum of th exp_Xb for each chidb
+sum_exp_Xb <- as.numeric(tapply(exp_Xb, sort(chidb), sum))
+```
+
+Este es el vector de probabilidades logit:
+
+```{r}
+P <- exp_Xb / sum_exp_Xb[sort(chidb)]
+```
+
+Ahora lo convertimos a una matriz de probabilidades logit, tal que cada fila sea la probabilidad de elección de un hogar:
+
+```{r}
+P <- data.frame(matrix(P, ncol = 6, byrow = TRUE))
+P <- transmute(P, ec = P[, 1], er = P[, 2], gc = P[, 3], gr = P[, 4], hp = P[, 5], new = P[, 6])
+```
+
+Podemos verificar que la suma de las probabilidades para cada fila es 1:
+
+```{r}
+summary(rowSums(P))
+```
+
+La aceptación estimada del nuevo sistema es el promedio de las probabilidades obtenidas:
+
+```{r}
+apply(P, 2, mean)
+```
+Se estima que la nueva tecnología tenga una aceptación de aproximadamente el 10.4%
+
+
+Comparando con las tasas originales obtenemos
+```{r}
+apply(fitted(model3, outcome = FALSE), 2, mean)
+```
+
+° ¿Podemos discernir los patrones de sustitución? Si, un poquito de todo.
+° ¿Son razonables los patrones de sustitución? Si
+
+### Simulación de resultados a nivel individual
+
+De vuelta al modelo 3, estas son sus probabilidades:
+
+```{r}
+p_model3 <- fitted(model3, outcome=FALSE) %>% data.frame()
+```
+
+Cuota de mercado pronosticado:
+
+```{r}
+apply(p_model3, 2, mean)
+```
+
+Podríamos usar una regla heurística para predecir la alternativa elegida, por ejemplo, asignando el resultado a la alternativa con la probabilidad más alta.
+
+```{r}
+o_model3 <- p_model3 %>%
+            # Group by row
+            rowwise() %>%
+            # Find the maximum value by row
+            mutate(max_p = max(c(ec, er, gc, gr, hp))) %>% ungroup() %>%
+            # Find the column that matches the highest probability
+            transmute(outcome = case_when(max_p == ec ~ "ec",
+                                          max_p == er ~ "er",
+                                          max_p == gc ~ "gc",
+                                          max_p == gr ~ "gr",
+                                          max_p == hp ~ "hp"))
+```
+
+
+Que tan frecuentes son las alternativas:
+
+```{r}
+table(o_model3)
+```
+
+# Observaciones
+
+Considero que este es un muy completo estudio del microeconomía, estudiando las disposiciones de cambio, descuentos, incentivos y efectos marginales.
+
+
+
+
+
+
+
+
+
+
+
+
