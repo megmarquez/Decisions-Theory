@@ -1,0 +1,835 @@
+---
+title: "CAPÍTULO 7"
+author: "Estefanía Gutiérrez"
+date: "2025-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(discrtr) # A companion package for the book Introduction to Discrete Choice Analysis with `R`
+library(dplyr) # A Grammar of Data Manipulation
+library(ggplot2) # Create Elegant Data Visualisations Using the Grammar of Graphics
+library(mlogit) # Multinomial Logit Models
+library(readr) # Read Rectangular Text Data
+library(gplots) # Various R Programming Tools for Plotting Data
+library(ggmosaic) # Mosaic Plots in the 'ggplot2' Framework
+library(treemapify)
+library(ggridges)
+library(ggalluvial)
+library(evd)
+library(htmlwidgets) # HTML Widgets for R
+library(kableExtra) # Construct Complex Table with kable and Pipe Syntax
+library(plotly) # Create interactive web graphics
+library(tidyr) # Tidy messy data
+
+library(evd)
+```
+
+
+# Introducción
+
+Este modelo para el análisis de elecciones discretas tiene la propiedad de que las elecciones cambian proporcionalmente cuando los atributos de una alternativa cambian.
+
+Se ejamplificará con el ejemplo de los sistemas de calefacción
+
+```{r}
+data("Heating", package = "mlogit")
+H <- mlogit.data(Heating, shape = "wide", choice = "depvar", varying = c(3:12))
+model3 <- mlogit(depvar ~ ic + oc, Heating, shape = "wide", choice = "depvar", reflevel = "ec", varying = c(3:12))
+summary(model3)
+```
+
+Para ello se modelará sustituyendo las tasas de adopción de los sistemas después de eliminar un sistema a la vez
+
+Se crea la matriz del nuevo modelo
+
+
+```{r}
+X <- model.matrix(model3)
+head(X)
+```
+
+```{r}
+alt <- index(H)$alt
+Xmec <- X[alt != "ec",]
+Xmer <- X[alt != "er",]
+Xmgc <- X[alt != "gc",]
+Xmgr <- X[alt != "gr",]
+Xmhp <- X[alt != "hp",]
+```
+
+
+Con este proceso preliminar, ahora podemos calcular la expresión e^{XB} y la suma, ésto para encontrar las probabilidades de logit.
+
+```{r}
+# Unique identifiers by decision-maker
+chid <- index(H)$chid
+# Remove the fifth identifier for each decision-maker
+chid <- chid[-seq(1, length(chid), 5)]
+```
+
+
+```{r}
+# After removing ec
+exp_Xb_mec <- as.numeric(exp(Xmec %*% coef(model3)))
+sum_exp_Xb_mec <- as.numeric(tapply(exp_Xb_mec, sort(chid), sum))
+P_mec <- exp_Xb_mec / sum_exp_Xb_mec[sort(chid)]
+# After removing er
+exp_Xb_mer <- as.numeric(exp(Xmer %*% coef(model3)))
+sum_exp_Xb_mer <- as.numeric(tapply(exp_Xb_mer, sort(chid), sum))
+P_mer <- exp_Xb_mer / sum_exp_Xb_mer[sort(chid)]
+# After removing gc
+exp_Xb_mgc <- as.numeric(exp(Xmgc %*% coef(model3)))
+sum_exp_Xb_mgc <- as.numeric(tapply(exp_Xb_mgc, sort(chid), sum))
+P_mgc <- exp_Xb_mgc / sum_exp_Xb_mgc[sort(chid)]
+# After removing gr
+exp_Xb_mgr <- as.numeric(exp(Xmgr %*% coef(model3)))
+sum_exp_Xb_mgr <- as.numeric(tapply(exp_Xb_mgr, sort(chid), sum))
+P_mgr <- exp_Xb_mgr / sum_exp_Xb_mgr[sort(chid)]
+# After removing hp
+exp_Xb_mhp <- as.numeric(exp(Xmhp %*% coef(model3)))
+sum_exp_Xb_mhp <- as.numeric(tapply(exp_Xb_mhp, sort(chid), sum))
+P_mhp <- exp_Xb_mhp / sum_exp_Xb_mhp[sort(chid)]
+```
+
+
+Ahora se convierte en una matriz para que cada fila contenga las probabilidades de elección decisora:
+
+```{r}
+# After removing ec
+P_mec <- data.frame(matrix(P_mec, ncol = 4, byrow = TRUE))
+P_mec <- transmute(P_mec,
+# Remove this alternative from the choice set
+ec = NA, er = P_mec[, 1], gc = P_mec[, 2], gr = P_mec[, 3], hp = P_mec[, 4])
+
+# After removing er
+P_mer <- data.frame(matrix(P_mer, ncol = 4, byrow = TRUE))
+P_mer <- transmute(P_mer, ec = P_mer[, 1],
+# Remove this alternative from the choice set
+er = NA, gc = P_mer[, 2], gr = P_mer[, 3], hp = P_mer[, 4])
+
+# After removing gc
+P_mgc <- data.frame(matrix(P_mgc, ncol = 4, byrow = TRUE))
+P_mgc <- transmute(P_mgc, ec = P_mgc[, 1], er = P_mgc[, 2],
+# Remove this alternative from the choice set
+gc = NA, gr = P_mgc[, 3], hp = P_mgc[, 4])
+
+# After removing gr
+P_mgr <- data.frame(matrix(P_mgr, ncol = 4, byrow = TRUE))
+P_mgr <- transmute(P_mgr, ec = P_mgr[, 1], er = P_mgr[, 2], gc = P_mgr[, 3],
+# Remove this alternative from the choice set
+gr = NA, hp = P_mgr[, 4])
+
+# After removing hp
+P_mhp <- data.frame(matrix(P_mhp, ncol = 4, byrow = TRUE))
+P_mhp <- transmute(P_mhp, ec = P_mhp[, 1], er = P_mhp[, 2], gc = P_mhp[, 3], gr = P_mhp[, 4],
+# Remove this alternative from the choice set
+hp = NA)
+```
+
+Se resume en tasas de adopción:
+
+```{r}
+df <- data.frame(Alternative = c("None", "ec", "er", "gc", "gr", "hp" ),
+rbind(apply(fitted(model3,
+outcome = FALSE),
+2, mean),
+apply(P_mec, 2, mean),
+apply(P_mer, 2, mean),
+apply(P_mgc, 2, mean),
+apply(P_mgr, 2, mean),
+apply(P_mhp, 2, mean))
+)
+df %>%
+kable(col.names = c("Alternative Removed",
+"ec",
+"er",
+"gc",
+"gr",
+"hp"),
+digits = 3) %>%
+kable_styling()
+```
+
+# Estimación del modelo logit anidado
+
+La estimación del modelo logit anidado permite analizar decisiones jerárquicas en las que las alternativas se agrupan en “nidos” con características similares. A diferencia del modelo logit multinomial, el logit anidado relaja el supuesto de independencia de alternativas irrelevantes (IIA) dentro de cada nido, permitiendo correlación en los errores entre opciones del mismo grupo. Su estimación se realiza generalmente mediante máxima verosimilitud, ajustando tanto los parámetros de utilidad como los coeficientes que capturan la correlación dentro de los nidos.
+
+
+```{r}
+nl1 <- mlogit(depvar ~ oc + ic, H, nests = list(room=c('er', 'gr'), central = c('ec', 'gc', 'hp')), steptol=1e-12)
+
+summary(nl1)
+```
+
+Coeficientes de costos de instalación y operación
+
+```{r}
+1-nl1$coefficients["iv:room"]
+```
+
+```{r}
+1-nl1$coefficients["iv:central"]
+```
+
+Determinamos la significancia:
+
+```{r}
+(nl1$coefficients["iv:room"] - 1) / sqrt(vcov(nl1)["iv:room","iv:room"])
+```
+
+```{r}
+(nl1$coefficients["iv:central"] - 1) / sqrt(vcov(nl1)["iv:central","iv:central"])
+```
+
+Se realiza también la prueba de proporción de verosimilitud
+
+```{r}
+lrtest(model3, nl1)
+```
+
+Y con éste generamos el parámetro único
+
+```{r}
+nl2 <- mlogit(depvar ~ ic + oc, H, nests = list(room = c( 'er', 'gr'), central = c('ec', 'gc', 'hp')),
+              un.nest.el = TRUE, steptol = 1e-12)
+
+summary(nl2)
+```
+
+
+# Considerando nidos diferentes
+
+```{r}
+nl_3 <- mlogit(depvar ~ oc + ic, H, nests = list(electric=c('ec', 'er', 'hp'), gas = c('gc', 'gr')), steptol=1e-12)
+
+#summary(nl_3)
+
+nl_3$coefficients
+```
+
+# Patrones de sustitución con el modelo logit anidado
+
+Examinaremos el moviemiento o cambio de las tasas de adopción evaluando la utilidad de cada alternativa 
+
+
+```{r}
+X <- model.matrix(nl2)
+head(X,12)
+```
+
+
+```{r}
+# Electric central
+exp_V_ec <- exp((X[alt == c("ec"), "oc"] * coef(nl2)["oc"] + X[alt == c("ec"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+# Gas central
+exp_V_gc <- exp((coef(nl2)["(Intercept):gc"] + X[alt == c("gc"), "oc"] * coef(nl2)["oc"] + X[alt == c("gc"), "ic"] * 
+                coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+# Heat pump
+exp_V_hp <- exp((coef(nl2)["(Intercept):hp"] + X[alt == c("hp"), "oc"] * coef(nl2)["oc"] + X[alt == c("hp"), "ic"] * 
+                   coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+# Electric room
+exp_V_er <- exp((coef(nl2)["(Intercept):er"] + X[alt == c("er"), "oc"] * coef(nl2)["oc"] + X[alt == c("er"), "ic"] *
+                 coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+# Gas room
+exp_V_gr <- exp((coef(nl2)["(Intercept):gr"] + X[alt == c("gr"), "oc"] * coef(nl2)["oc"] + X[alt == c("gr"), "ic"] *
+                 coef(nl2)["ic"]) / coef(nl2)["iv"])
+```
+
+Las probabilidades condicionales son los modelos logit en cada nido
+
+```{r}
+# Conditional probabilities of systems within the central nest after removing ec
+cp_mec_c <- data.frame(gc = exp_V_gc / (exp_V_gc + exp_V_hp), hp = exp_V_hp / (exp_V_gc + exp_V_hp))
+
+# Conditional probabilities of systems within the central nest after removing gc
+cp_mgc_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_hp), hp = exp_V_hp / (exp_V_ec + exp_V_hp))
+
+# Conditional probabilities of systems within the central nest  after removing hp
+cp_mhp_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc), gc = exp_V_gc / (exp_V_ec + exp_V_gc))
+
+# Conditional probabilities of systems within the room nest after removing a system in the central nest
+cp_mc_r <- data.frame(er = exp_V_er / (exp_V_er + exp_V_gr), gr = exp_V_gr / (exp_V_er + exp_V_gr))
+
+# Conditional probabilities of systems within the room nest after removing er
+cp_mer_r <- data.frame(gr = exp_V_gr / (exp_V_gr))
+
+# Conditional probabilities of systems within the room nest after removing gr
+cp_mgr_r <- data.frame(er = exp_V_er / (exp_V_er))
+
+# Conditional probabilities of systems within the central nest after removing a system in the room nest
+cp_mr_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc + exp_V_hp), gc = exp_V_gc / (exp_V_ec + exp_V_gc + exp_V_hp),
+                      hp = exp_V_hp / (exp_V_ec + exp_V_gc + exp_V_hp))
+```
+
+Las probabilidades marginales son las probabilidades logit de escoger un nido dada la utilidad máxima esperada de cada nido
+
+```{r}
+#After removing ec
+mp_mec <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] 
+                               * log(exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp))
+                            + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))) )
+
+#After removing gc
+mp_mgc <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_hp)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + 
+                               exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_hp))                             + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr))))  )
+
+#After removing hp
+mp_mhp <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc)) / (exp(coef(nl2)["iv"] * log(exp_V_ec +
+                               exp_V_gc)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) /
+                            (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))) )
+
+#After removing er
+mp_mer <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] *
+                               log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp))
+                            + exp((coef(nl2)["iv"] * log(exp_V_gr))))  )
+
+#After removing gr
+mp_mgr <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] *
+                               log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er)))),
+          room = exp(coef(nl2)["iv"] * log(exp_V_er)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er)))) )
+```
+
+
+Una vez que las probabilidades condicionales y marginales para cada caso han sido calculadas, las probabilidades de elección son el producto de dichas probabilidades
+
+```{r}
+#After removing ec
+nlp_mec <- data.frame(cp_mec_c, cp_mc_r, mp_mec) %>% 
+           transmute(p_ec = NA, p_gc = gc * central, p_hp = hp * central, p_er = er * room, p_gr = gr * room)
+
+#After removing gc
+nlp_mgc <- data.frame(cp_mgc_c, cp_mc_r, mp_mgc) %>%
+           transmute(p_ec = ec * central, p_gc = NA, p_hp = hp * central, p_er = er * room, p_gr = gr * room)
+
+#After removing hp
+nlp_mhp <- data.frame(cp_mhp_c, cp_mc_r, mp_mhp) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = NA, p_er = er * room, p_gr = gr * room)
+
+#After removing er
+nlp_mer <- data.frame(cp_mr_c, cp_mer_r, mp_mer) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = hp * central, p_er = NA, p_gr = gr * room)
+
+#After removing gr
+nlp_mgr <- data.frame(cp_mr_c, cp_mgr_r, mp_mgr) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = hp * central, p_er = er * room, p_gr = NA)
+```
+
+
+Se realiza una revisión preliminar para verificar la suma de las probabilidades
+
+
+```{r}
+summary(rowSums(nlp_mec, na.rm = TRUE))
+
+summary(rowSums(nlp_mgc, na.rm = TRUE))
+
+summary(rowSums(nlp_mhp, na.rm = TRUE))
+
+summary(rowSums(nlp_mer, na.rm = TRUE))
+
+summary(rowSums(nlp_mgr, na.rm = TRUE))
+```
+
+Esta es la tabla de las adopciones originales y para las diferentes situaciones de interés, después de remover una alternativa a la vez:
+
+```{r}
+# Original adoption rates
+# Using the fitted function to calculate the probabilities for each household
+p_o <- apply(fitted(nl2, outcome = FALSE), 2, mean)
+
+df <- data.frame(Alternative = c("None", "ec", "gc", "hp", "er", "gr" ),
+                 rbind(c(p_o["ec"], p_o["gc"], p_o["hp"], p_o["er"], p_o["gr"]),
+                       apply(nlp_mec, 2, mean), apply(nlp_mgc, 2, mean),
+                       apply(nlp_mhp, 2, mean), apply(nlp_mer, 2, mean),
+                       apply(nlp_mgr, 2, mean)))
+
+df %>% kable(col.names = c("Alternative Removed", "ec", "gc", "hp", "er", "gr"),
+             digits = 3) %>% kable_styling()
+```
+
+# Logit combinatorio emparejado
+
+Crea combinaciones emparejadas automáticamente
+
+```{r}
+pcl <- mlogit(depvar ~ ic + oc, H, nests="pcl", steptol = 1e-12)
+summary(pcl)
+```
+
+Se puede reducir el número de nidos
+
+Primero compararemos el z-score con el uno:
+
+```{r}
+as.numeric((1 - pcl$coefficients["iv:ec.gc"])/8.6470812)
+```
+
+Con un p-value de 0.5055511, no hay evidencia estadística suficiente para rechazar la hipótesis nula (landa es diferente de uno), por lo tanto, podemos restringir este parámetro como se muestra a continuación:
+
+
+```{r}
+pcl2 <- mlogit(depvar ~ ic + oc, H, nests = "pcl", constPar=c("iv:ec.gc"), steptol = 1e-12)
+
+summary(pcl2)
+```
+
+
+# Elasticidad de los modelos anidados
+
+Recordemos que la elasticidad es el cambio en la probabilidad al cambiar en uno por ciento algún atributo.
+
+```{r}
+X_mean <- model.matrix(nl2)[1:5,]
+alt <- index(H)$alt[1:5]
+```
+
+Se calculan las medias
+
+```{r}
+mean_ic <- H %>% group_by(alt) %>% summarize(ic = mean(ic)) %>% arrange(alt)
+
+mean_oc <- H %>% group_by(alt) %>% summarize(oc = mean(oc)) %>% arrange(alt)
+```
+
+Se reemplazan en la matriz del modelo para los efectos
+
+```{r}
+X_mean[,5] <- mean_ic$ic
+
+X_mean[,6] <- mean_oc$oc
+```
+
+Se calcula la exponencial de las funciones de utilidad con los costos dados por las medias para cada alternativa; nótese que se utilizó el coeficiente del valor inclusivo
+
+
+```{r}
+# Electric central
+exp_V_ec <- exp((X_mean[alt == c("ec"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("ec"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+# Electric room
+exp_V_er <- exp((coef(nl2)["(Intercept):er"] + X_mean[alt == c("er"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("er"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+# Gas central
+exp_V_gc <- exp((coef(nl2)["(Intercept):gc"] + X_mean[alt == c("gc"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("gc"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+# Gas room
+exp_V_gr <- exp((coef(nl2)["(Intercept):gr"] + X_mean[alt == c("gr"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("gr"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+# Heat pump
+exp_V_hp <- exp((coef(nl2)["(Intercept):hp"] + X_mean[alt == c("hp"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("hp"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+```
+
+Las probabilidades condicionales son los modelos logit en cada nido
+
+```{r}
+# Conditional probabilities of systems within the central nest
+cp_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc + exp_V_hp),
+                   gc = exp_V_gc / (exp_V_ec + exp_V_gc + exp_V_hp),
+                   hp = exp_V_hp / (exp_V_ec + exp_V_gc + exp_V_hp))
+
+# Conditional probabilities of systems within the room nest
+cp_r <- data.frame(er = exp_V_er / (exp_V_er + exp_V_gr),
+                   gr = exp_V_gr / (exp_V_er + exp_V_gr))
+```
+
+
+Las probabilidades marginales son las probabilidades logit de escoger un nido, dada la utilidad esperada máxima de cada nido
+
+```{r}
+#After removing ec
+mp <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp))
+                          / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) +
+                          exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp)) +
+                      exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))))
+```
+
+Se extraen los términos necesarios para calcular las probabilidades conjuntas y las elasticidades en el conjunto de datos nlp
+
+```{r}
+nlp <- data.frame(system = c("ec", "er", "gc", "gr", "hp"),
+                  # Conditional probability
+                  cp = c(cp_c$ec, cp_r$er, cp_c$gc, cp_r$gr, cp_c$hp),
+                  # Marginal probability
+                  mp = c(mp$central, mp$room, mp$central, mp$room, mp$central),
+                  beta_ic = c(as.numeric(nl2$coefficients["ic"])),
+                  beta_oc = c(as.numeric(nl2$coefficients["oc"])),
+                  lambda = c(as.numeric(nl2$coefficients["iv"]))) %>%
+# Joint probability
+mutate(p = cp * mp)
+```
+
+Se incrementa el costo de instalación 1%
+
+```{r}
+nlp <- cbind(nlp, X_mean[,5:6]) %>%
+# Increase installation cost 1%
+mutate(ic_1pct = 1.01 * ic)
+```
+
+Se calcula la elasticidad contemplando el cambio de 1% en cada media
+
+```{r}
+direct_elasticities <- nlp %>%
+                       transmute(DEM = ((1 - mp) + (1 - cp) * (1 - lambda)/lambda) * beta_ic * ic)
+
+direct_elasticities
+```
+
+Ahora calculamos las elasticidades transversales (cruzadas) dado un cambio del 1% en la media del costo en cada una de las alternativas
+ 
+```{r}
+elasticities <- nlp %>%
+transmute(CEM_ec = -(mp + (1 - lambda)/lambda * cp) * beta_ic * mean_ic$ic[mean_ic == "ec"],
+CEM_er = -(mp + (1 - lambda)/lambda * cp) * beta_ic * mean_ic$ic[mean_ic == "er"],
+CEM_gc = -(mp + (1 - lambda)/lambda * cp) * beta_ic * mean_ic$ic[mean_ic == "gc"],
+CEM_gr = -(mp + (1 - lambda)/lambda * cp) * beta_ic * mean_ic$ic[mean_ic == "gr"],
+CEM_hp = -(mp + (1 - lambda)/lambda * cp) * beta_ic * mean_ic$ic[mean_ic == "hp"]) %>%
+# Transmute so that each row is the elasticity due to changes to a system
+t()
+```
+
+
+Se reemplazan los valores en la diagonal con las elasticidades directas
+
+```{r}
+diag(elasticities) <- direct_elasticities$DEM
+```
+
+Obtenemos la matriz de elasticidad:
+
+```{r}
+elasticities
+```
+Compárense las elasticidades del modelo logit anidado con las del modelo logit multinomial (Model 3), primero calculamos la media de las variables relativas a los costos
+
+```{r}
+# Copy a single row of the input data frame
+ic_oc_mean <- Heating[1,]
+# Calculate the mean of the cost variables for each system
+mean_ic_oc <- Heating %>%
+select(starts_with("ic") | starts_with("oc"))%>%
+summarise(across(.cols = everything(),
+mean))
+# Replace the cost of installation and operation with the mean values:
+ic_oc_mean[3:12] <- mean_ic_oc
+```
+
+
+```{r}
+effects(model3,
+covariate = "oc",
+type = "rr",
+data = mlogit.data(ic_oc_mean,
+shape = "wide",
+choice = "depvar",
+varying = 3:12))
+```
+# Ejercicios 
+
+## 2 Usa el modelo nl2 de este capítulo y calcula el punto directo de elasticidad en la media de los valores de las variables, para un incremento en la instalación de los costos de los sistemas de Gas Central
+
+Primero se copian los primeros 5 elementos de la matriz del modelo (una fila por cada alternativa)
+
+```{r}
+nl2 <- mlogit(depvar ~ ic + oc, H, nests = list(room = c( 'er', 'gr'), central = c('ec', 'gc', 'hp')),
+              un.nest.el = TRUE, steptol = 1e-12)
+
+summary(nl2)
+```
+
+
+Se calcula la elasticidad
+
+```{r}
+X_mean <- model.matrix(nl2)[1:5,]
+alt <- index(H)$alt[1:5]
+```
+
+Se calculan las medias de los costos de instalación y operación para cada sistema
+
+```{r}
+mean_ic <- H %>% group_by(alt) %>% summarize(ic = mean(ic)) %>% arrange(alt)
+
+mean_oc <- H %>% group_by(alt) %>% summarize(oc = mean(oc)) %>% arrange(alt)
+```
+
+Se calcula la exponencial de las funciones de utilidad con los costos dados por las medias para cada alternativa; nótese que se utilizó el coeficiente del valor inclusivo
+
+```{r}
+exp_V_ec <- exp((X_mean[alt == c("ec"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("ec"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+exp_V_er <- exp((coef(nl2)["(Intercept):er"] + X_mean[alt == c("er"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("er"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+exp_V_gc <- exp((coef(nl2)["(Intercept):gc"] + X_mean[alt == c("gc"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("gc"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+exp_V_gr <- exp((coef(nl2)["(Intercept):gr"] + X_mean[alt == c("gr"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("gr"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+exp_V_hp <- exp((coef(nl2)["(Intercept):hp"] + X_mean[alt == c("hp"), "oc"] * coef(nl2)["oc"] +
+            X_mean[alt == c("hp"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+```
+
+```{r}
+cp_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc + exp_V_hp),
+                   gc = exp_V_gc / (exp_V_ec + exp_V_gc + exp_V_hp),
+                   hp = exp_V_hp / (exp_V_ec + exp_V_gc + exp_V_hp))
+
+cp_r <- data.frame(er = exp_V_er / (exp_V_er + exp_V_gr),
+                   gr = exp_V_gr / (exp_V_er + exp_V_gr))
+```
+
+```{r}
+mp <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp))
+                          / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) +
+                          exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp)) +
+                      exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))))
+```
+
+```{r}
+nlp <- data.frame(system = c("ec", "er", "gc", "gr", "hp"),
+                  cp = c(cp_c$ec, cp_r$er, cp_c$gc, cp_r$gr, cp_c$hp),
+                  mp = c(mp$central, mp$room, mp$central, mp$room, mp$central),
+                  beta_ic = c(as.numeric(nl2$coefficients["ic"])),
+                  beta_oc = c(as.numeric(nl2$coefficients["oc"])),
+                  lambda = c(as.numeric(nl2$coefficients["iv"]))) %>%
+mutate(p = cp * mp)
+```
+
+
+## 3 Usa el modelo nl2 de este capítulo para calcular el punto cruzado de la elasticidad en la media de los valores de las variables, para un incremento del 1% en la operación del sistema de costos del Gas Central
+
+```{r}
+nlp <- cbind(nlp, X_mean[,5:6]) %>%
+mutate(ic_1pct = 1.01 * ic)
+```
+
+```{r}
+direct_elasticities <- nlp %>%
+                       transmute(DEM = ((1 - mp) + (1 - cp) * (1 - lambda)/lambda) * beta_ic * ic)
+
+direct_elasticities
+```
+
+## 4 Reestima el modelo logit de nido del capítulo, pero cambia el nido a los tipos de energía de a continuación:
+
+° Gas: Gas Central, Gas Room
+° Electricidad: Central Eléctrica, Electric Room, Heat Pump
+
+Usa un coeficiente para las variables inclusivas (i.e.,set un.nest.el = TRUE).
+
+¿Son los resultados rasonables?
+ 
+```{r}
+nl1 <- mlogit(depvar ~ oc + ic, H, nests = list(room=c('er', 'gr'), central = c('ec', 'gc', 'hp')), steptol=1e-12)
+
+summary(nl1)
+```
+
+```{r}
+1-nl1$coefficients["iv:room"]
+```
+```{r}
+1-nl1$coefficients["iv:central"]
+```
+Efectivamente, las correlaciones en los nidos son muy altas. Podemos determinar cuándo la correlación es significativa por medio del t-test
+
+```{r}
+(nl1$coefficients["iv:room"] - 1) / sqrt(vcov(nl1)["iv:room","iv:room"])
+```
+
+```{r}
+(nl1$coefficients["iv:central"] - 1) / sqrt(vcov(nl1)["iv:central","iv:central"])
+```
+
+```{r}
+lrtest(model3, nl1)
+```
+```{r}
+nl2 <- mlogit(depvar ~ ic + oc, H, nests = list(room = c( 'er', 'gr'), central = c('ec', 'gc', 'hp')),
+              un.nest.el = TRUE, steptol = 1e-12)
+
+summary(nl2)
+```
+
+```{r}
+lrtest(nl2, nl1)
+```
+
+Aquí es el cambio de variables
+
+```{r}
+nl_3 <- mlogit(depvar ~ oc + ic, H, nests = list(electric=c('ec', 'er', 'hp'), gas = c('gc', 'gr')), steptol=1e-12)
+
+
+nl_3$coefficients
+```
+
+Patrones de sustitución con el modelo logit anidado
+
+```{r}
+X <- model.matrix(nl2)
+head(X,12)
+```
+
+```{r}
+exp_V_ec <- exp((X[alt == c("ec"), "oc"] * coef(nl2)["oc"] + X[alt == c("ec"), "ic"] * coef(nl2)["ic"]) / coef(nl2)["iv"])
+
+exp_V_gc <- exp((coef(nl2)["(Intercept):gc"] + X[alt == c("gc"), "oc"] * coef(nl2)["oc"] + X[alt == c("gc"), "ic"] * 
+                coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+exp_V_hp <- exp((coef(nl2)["(Intercept):hp"] + X[alt == c("hp"), "oc"] * coef(nl2)["oc"] + X[alt == c("hp"), "ic"] * 
+                   coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+exp_V_er <- exp((coef(nl2)["(Intercept):er"] + X[alt == c("er"), "oc"] * coef(nl2)["oc"] + X[alt == c("er"), "ic"] *
+                 coef(nl2)["ic"])/ coef(nl2)["iv"])
+
+exp_V_gr <- exp((coef(nl2)["(Intercept):gr"] + X[alt == c("gr"), "oc"] * coef(nl2)["oc"] + X[alt == c("gr"), "ic"] *
+                 coef(nl2)["ic"]) / coef(nl2)["iv"])
+```
+
+Las probabilidades condicionales son los modelos logit en cada nido
+
+```{r}
+
+cp_mec_c <- data.frame(gc = exp_V_gc / (exp_V_gc + exp_V_hp), hp = exp_V_hp / (exp_V_gc + exp_V_hp))
+
+
+cp_mgc_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_hp), hp = exp_V_hp / (exp_V_ec + exp_V_hp))
+
+
+cp_mhp_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc), gc = exp_V_gc / (exp_V_ec + exp_V_gc))
+
+
+cp_mc_r <- data.frame(er = exp_V_er / (exp_V_er + exp_V_gr), gr = exp_V_gr / (exp_V_er + exp_V_gr))
+
+
+cp_mer_r <- data.frame(gr = exp_V_gr / (exp_V_gr))
+
+
+cp_mgr_r <- data.frame(er = exp_V_er / (exp_V_er))
+
+
+cp_mr_c <- data.frame(ec = exp_V_ec / (exp_V_ec + exp_V_gc + exp_V_hp), gc = exp_V_gc / (exp_V_ec + exp_V_gc + exp_V_hp),
+                      hp = exp_V_hp / (exp_V_ec + exp_V_gc + exp_V_hp))
+```
+
+Las probabilidades marginales son las probabilidades logit de escoger un nido dada la utilidad máxima esperada de cada nido
+
+```{r}
+mp_mec <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] 
+                               * log(exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_gc + exp_V_hp))
+                            + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))) )
+
+mp_mgc <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_hp)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + 
+                               exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_hp))                             + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr))))  )
+
+mp_mhp <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc)) / (exp(coef(nl2)["iv"] * log(exp_V_ec +
+                               exp_V_gc)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)) /
+                            (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc)) + exp((coef(nl2)["iv"] * log(exp_V_er + exp_V_gr)))) )
+
+mp_mer <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] *
+                               log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_gr)))),
+                     room = exp(coef(nl2)["iv"] * log(exp_V_gr)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp))
+                            + exp((coef(nl2)["iv"] * log(exp_V_gr))))  )
+
+mp_mgr <- data.frame(central = exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) / (exp(coef(nl2)["iv"] *
+                               log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er)))),
+          room = exp(coef(nl2)["iv"] * log(exp_V_er)) / (exp(coef(nl2)["iv"] * log(exp_V_ec + exp_V_gc + exp_V_hp)) + exp((coef(nl2)["iv"] * log(exp_V_er)))) )
+```
+
+Una vez que las probabilidades condicionales y marginales para cada caso han sido calculadas, las probabilidades de elección son el producto de dichas probabilidades
+
+```{r}
+
+nlp_mec <- data.frame(cp_mec_c, cp_mc_r, mp_mec) %>% 
+           transmute(p_ec = NA, p_gc = gc * central, p_hp = hp * central, p_er = er * room, p_gr = gr * room)
+
+
+nlp_mgc <- data.frame(cp_mgc_c, cp_mc_r, mp_mgc) %>%
+           transmute(p_ec = ec * central, p_gc = NA, p_hp = hp * central, p_er = er * room, p_gr = gr * room)
+
+
+nlp_mhp <- data.frame(cp_mhp_c, cp_mc_r, mp_mhp) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = NA, p_er = er * room, p_gr = gr * room)
+
+
+nlp_mer <- data.frame(cp_mr_c, cp_mer_r, mp_mer) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = hp * central, p_er = NA, p_gr = gr * room)
+
+
+nlp_mgr <- data.frame(cp_mr_c, cp_mgr_r, mp_mgr) %>%
+           transmute(p_ec = ec * central, p_gc = gc * central, p_hp = hp * central, p_er = er * room, p_gr = NA)
+```
+
+Se realiza una revisión preliminar para verificar que la suma de las probabilidades para cada decisor es igual a uno
+
+```{r}
+summary(rowSums(nlp_mec, na.rm = TRUE))
+```
+```{r}
+summary(rowSums(nlp_mgc, na.rm = TRUE))
+```
+
+```{r}
+summary(rowSums(nlp_mhp, na.rm = TRUE))
+```
+```{r}
+summary(rowSums(nlp_mer, na.rm = TRUE))
+```
+```{r}
+summary(rowSums(nlp_mgr, na.rm = TRUE))
+```
+tabla 
+
+```{r}
+# Original adoption rates
+# Using the fitted function to calculate the probabilities for each household
+p_o <- apply(fitted(nl2, outcome = FALSE), 2, mean)
+
+df <- data.frame(Alternative = c("None", "ec", "gc", "hp", "er", "gr" ),
+                 rbind(c(p_o["ec"], p_o["gc"], p_o["hp"], p_o["er"], p_o["gr"]),
+                       apply(nlp_mec, 2, mean), apply(nlp_mgc, 2, mean),
+                       apply(nlp_mhp, 2, mean), apply(nlp_mer, 2, mean),
+                       apply(nlp_mgr, 2, mean)))
+
+df %>% kable(col.names = c("Alternative Removed", "ec", "gc", "hp", "er", "gr"),
+             digits = 3) %>% kable_styling()
+```
+
+
+Considero que los resultados son razonables porque las más utilizadas son las menos elásticas, es decir que son más constantes.
+
+
+
+
+
+
